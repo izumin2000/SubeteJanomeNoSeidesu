@@ -26,11 +26,11 @@ pytest tests/
 
 ## word.jsonの生成
 
-word2vecモデルファイル（例: `cc.ja.300.vec.gz`、fastTextの日本語学習済みベクトル）を手元に用意した上で実行する。
+```
+python generate_word_json.py
+```
 
-```
-python generate_word_json.py --vector-file cc.ja.300.vec.gz
-```
+word2vecモデルはfastTextの日本語学習済みベクトル（`cc.ja.300.vec.gz`、圧縮状態で約1.2GB）に固定している。カレントディレクトリに無ければ自動的にダウンロードする（初回のみ時間がかかる）。既に手元にある場合は、カレントディレクトリに `cc.ja.300.vec.gz` という名前で置いておけばダウンロードをスキップする。
 
 生成された `word.json` を、subekashiリポジトリの `subekashi/constants/dynamic/word.json` に配置して `python manage.py word` を実行すると、`Word` モデルに取り込まれる。
 
