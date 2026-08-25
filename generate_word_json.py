@@ -3,8 +3,6 @@ Song APIから歌詞を取得し、word2vecモデルで模倣単語候補を計�
 word.json（subekashiの`manage.py word`コマンドが読み込む形式）を出力する。
 
 実行にはword2vecモデルファイル（例: cc.ja.300.vec.gz）が別途必要。
-Google Colab上で実行する場合は、事前にGoogle Driveから取得しておくこと
-（SubeteJanomeNoSeidesu.ipynb 参照）。
 
 使い方:
     python generate_word_json.py --vector-file cc.ja.300.vec.gz

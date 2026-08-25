@@ -1,8 +1,6 @@
 """
 歌詞のトークナイズと、word2vecモデルを使った模倣単語候補の抽出ロジック。
 
-Google Colab固有の処理（Driveのマウント、パッケージインストール、
-ベクトルファイルの取得、Song APIの呼び出し）は含まない。
 `build_word_candidates()` に歌詞のリストと読み込み済みのword2vecモデル
 （gensimのKeyedVectors互換：`in`演算子と`most_similar(positive=..., topn=...)`
 が使えるもの）を渡すと、subekashi側の `manage.py word` が読み込む

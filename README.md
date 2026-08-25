@@ -9,7 +9,6 @@
 - `similar_words.py`: 歌詞のトークナイズと模倣単語候補の抽出ロジック（word2vecモデル非依存の部分、テスト対象）
 - `generate_word_json.py`: Song APIから歌詞を取得し、word2vecモデルを使って `word.json` を出力するスクリプト
 - `tests/test_similar_words.py`: `similar_words.py` の単体テスト（word2vecモデルはフェイクを使用し、ロジック部分のみ検証）
-- `SubeteJanomeNoSeidesu.ipynb`: Google Colab上で実行するためのノートブック（Driveマウント・ベクトルファイル取得等のColab固有処理を含む）
 
 ## セットアップ（ローカル）
 
@@ -27,15 +26,13 @@ pytest tests/
 
 ## word.jsonの生成
 
-word2vecモデルファイル（例: `cc.ja.300.vec.gz`、fastTextの日本語学習済みベクトル）を用意した上で実行する。
+word2vecモデルファイル（例: `cc.ja.300.vec.gz`、fastTextの日本語学習済みベクトル）を手元に用意した上で実行する。
 
 ```
 python generate_word_json.py --vector-file cc.ja.300.vec.gz
 ```
 
 生成された `word.json` を、subekashiリポジトリの `subekashi/constants/dynamic/word.json` に配置して `python manage.py word` を実行すると、`Word` モデルに取り込まれる。
-
-Google Colab上で実行する場合は `SubeteJanomeNoSeidesu.ipynb` を使う（Google Driveに `cc.ja.300.vec.gz` を配置しておく必要がある）。
 
 ## word.jsonの形式
 
