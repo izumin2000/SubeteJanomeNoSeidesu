@@ -12,80 +12,115 @@ word2vecモデルはfastTextの日本語学習済みベクトル（cc.ja.300.vec
 import argparse
 import json
 import os
+import time
 
 import gensim
 import requests
 
 from similar_words import build_word_candidates
 
-DEFAULT_SONG_API = "https://subekashi.izmn.net/api/song/"
+DEFAULT_SONG_API = "https://lyrics.imicomweb.com/api/song/"
+DEFAULT_PAGE_SIZE = 500
 
 VECTOR_FILE = "cc.ja.300.vec.gz"
 VECTOR_URL = "https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.ja.300.vec.gz"
 
 
-def ensure_vector_file(path=VECTOR_FILE, url=VECTOR_URL):
+def ensure_vector_file(path=VECTOR_FILE, url=VECTOR_URL, max_retries=5):
     """
-    word2vecベクトルファイルがローカルに無ければダウンロードする。
-    ダウンロードが中断された場合に不完全なファイルを正常なものとして
-    扱わないよう、一時ファイルに書き込んでから完了後にリネームする。
+    word2vecベクトルファイル（約1.2GB）がローカルに無ければダウンロードする。
+
+    不安定なネットワークでも完走できるよう、通信エラー発生時は
+    Rangeリクエストでダウンロード済みの続きから再試行する
+    （サーバーがRangeに対応していない場合は最初からやり直す）。
+    ダウンロードが完了するまでは一時ファイル（.part）に書き込み、
+    完了後にリネームすることで、不完全なファイルが正常なものとして
+    扱われないようにする。
     """
     if os.path.exists(path):
         return path
 
-    print(f"{path} が見つからないため、ダウンロードします: {url}")
     tmp_path = path + ".part"
-    try:
-        with requests.get(url, stream=True, timeout=60) as res:
-            res.raise_for_status()
-            total = int(res.headers.get("Content-Length", 0))
-            downloaded = 0
-            with open(tmp_path, "wb") as f:
-                for chunk in res.iter_content(chunk_size=1024 * 1024):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total:
-                        percent = downloaded * 100 // total
-                        print(
-                            f"\rダウンロード中... {percent}% "
-                            f"({downloaded // (1024 * 1024)}MB / {total // (1024 * 1024)}MB)",
-                            end="",
-                        )
+    for attempt in range(1, max_retries + 1):
+        downloaded = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
+        headers = {"Range": f"bytes={downloaded}-"} if downloaded else {}
+
+        try:
+            with requests.get(url, stream=True, timeout=30, headers=headers) as res:
+                if downloaded and res.status_code == 206:
+                    mode = "ab"
+                else:
+                    res.raise_for_status()
+                    downloaded = 0
+                    mode = "wb"
+
+                total = downloaded + int(res.headers.get("Content-Length", 0))
+                with open(tmp_path, mode) as f:
+                    for chunk in res.iter_content(chunk_size=1024 * 1024):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total:
+                            percent = downloaded * 100 // total
+                            print(
+                                f"\rダウンロード中(試行{attempt}/{max_retries})... {percent}% "
+                                f"({downloaded // (1024 * 1024)}MB / {total // (1024 * 1024)}MB)",
+                                end="",
+                            )
             print()
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise
+            os.replace(tmp_path, path)
+            return path
+        except requests.exceptions.RequestException as e:
+            print(f"\nダウンロードに失敗しました（試行{attempt}/{max_retries}）: {e}")
+            if attempt == max_retries:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                raise
+            time.sleep(min(2 ** attempt, 30))
 
-    os.replace(tmp_path, path)
-    return path
 
-
-def fetch_lyrics(song_api_url=DEFAULT_SONG_API):
+def fetch_lyrics(song_api_url=DEFAULT_SONG_API, page_size=DEFAULT_PAGE_SIZE):
     """
     Song APIから歌詞テキストの一覧を取得する。
+
+    Song APIのレスポンスは {"result": [...], "page": int, "max_page": int, ...}
+    形式のページネーションされたオブジェクトであるため、max_pageまで
+    ページを辿って全件取得する。
     ネタ動画（is_joke）・界隈曲か疑わしい曲（is_questionable）は除外する。
     """
-    response = requests.get(f"{song_api_url}?format=json")
-    response.raise_for_status()
-    songs = response.json()
+    lyrics_list = []
+    page = 1
+    while True:
+        response = requests.get(
+            f"{song_api_url}?format=json",
+            params={"size": page_size, "page": page},
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-    return [
-        song["lyrics"]
-        for song in songs
-        if song.get("lyrics") and not song.get("is_joke") and not song.get("is_questionable")
-    ]
+        lyrics_list.extend(
+            song["lyrics"]
+            for song in data["result"]
+            if song.get("lyrics") and not song.get("is_joke") and not song.get("is_questionable")
+        )
+
+        if page >= data["max_page"]:
+            break
+        page += 1
+
+    return lyrics_list
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--song-api", default=DEFAULT_SONG_API, help="Song APIのベースURL")
+    parser.add_argument("--page-size", type=int, default=DEFAULT_PAGE_SIZE, help="Song API取得時の1ページあたり件数")
     parser.add_argument("--output", default="word.json", help="出力先ファイルパス")
     parser.add_argument("--max-candidates", type=int, default=20, help="単語ごとに保存する候補数の上限")
     args = parser.parse_args()
 
     print(f"歌詞を取得中... ({args.song_api})")
-    lyrics_list = fetch_lyrics(args.song_api)
+    lyrics_list = fetch_lyrics(args.song_api, page_size=args.page_size)
     print(f"{len(lyrics_list)}件の歌詞を取得しました")
 
     vector_path = ensure_vector_file()
