@@ -42,10 +42,10 @@ def ensure_vector_file(path=VECTOR_FILE, url=VECTOR_URL, max_retries=5):
 
     tmp_path = path + ".part"
     for attempt in range(1, max_retries + 1):
-        downloaded = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
-        headers = {"Range": f"bytes={downloaded}-"} if downloaded else {}
-
         try:
+            downloaded = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
+            headers = {"Range": f"bytes={downloaded}-"} if downloaded else {}
+
             with requests.get(url, stream=True, timeout=30, headers=headers) as res:
                 if downloaded and res.status_code == 206:
                     mode = "ab"
@@ -69,11 +69,35 @@ def ensure_vector_file(path=VECTOR_FILE, url=VECTOR_URL, max_retries=5):
             print()
             os.replace(tmp_path, path)
             return path
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.RequestException, OSError) as e:
+            # OSErrorも捕捉するのは、ダウンロード中のファイルロック等
+            # （例: Windows上のウイルス対策ソフトによる一時的なロック）で
+            # os.path.getsize/open がエラーになるケースも再試行対象に
+            # 含めるため
             print(f"\nダウンロードに失敗しました（試行{attempt}/{max_retries}）: {e}")
             if attempt == max_retries:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
+                raise
+            time.sleep(min(2 ** attempt, 30))
+
+
+def _fetch_song_page(song_api_url, page_size, page, max_retries=3):
+    """1ページ分をリトライ付きで取得する（一時的な5xx等に備えるため）"""
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.get(
+                f"{song_api_url}?format=json",
+                params={"size": page_size, "page": page},
+                timeout=60,
+            )
+            response.raise_for_status()
+            return response.json()
+        except (requests.exceptions.RequestException, ValueError) as e:
+            # ValueErrorはresponse.json()がJSONとしてパースできない場合
+            # （メンテナンスページ等が返ってきたケース）を捕捉する
+            print(f"\nページ{page}の取得に失敗しました（試行{attempt}/{max_retries}）: {e}")
+            if attempt == max_retries:
                 raise
             time.sleep(min(2 ** attempt, 30))
 
@@ -90,13 +114,7 @@ def fetch_lyrics(song_api_url=DEFAULT_SONG_API, page_size=DEFAULT_PAGE_SIZE):
     lyrics_list = []
     page = 1
     while True:
-        response = requests.get(
-            f"{song_api_url}?format=json",
-            params={"size": page_size, "page": page},
-            timeout=60,
-        )
-        response.raise_for_status()
-        data = response.json()
+        data = _fetch_song_page(song_api_url, page_size, page)
 
         lyrics_list.extend(
             song["lyrics"]
@@ -111,12 +129,19 @@ def fetch_lyrics(song_api_url=DEFAULT_SONG_API, page_size=DEFAULT_PAGE_SIZE):
     return lyrics_list
 
 
+def _positive_int(value):
+    int_value = int(value)
+    if int_value < 1:
+        raise argparse.ArgumentTypeError(f"1以上の整数を指定してください: {value}")
+    return int_value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--song-api", default=DEFAULT_SONG_API, help="Song APIのベースURL")
-    parser.add_argument("--page-size", type=int, default=DEFAULT_PAGE_SIZE, help="Song API取得時の1ページあたり件数")
+    parser.add_argument("--page-size", type=_positive_int, default=DEFAULT_PAGE_SIZE, help="Song API取得時の1ページあたり件数")
     parser.add_argument("--output", default="word.json", help="出力先ファイルパス")
-    parser.add_argument("--max-candidates", type=int, default=20, help="単語ごとに保存する候補数の上限")
+    parser.add_argument("--max-candidates", type=_positive_int, default=20, help="単語ごとに保存する候補数の上限")
     args = parser.parse_args()
 
     print(f"歌詞を取得中... ({args.song_api})")

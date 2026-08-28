@@ -12,9 +12,29 @@ import unicodedata
 
 from janome.tokenizer import Tokenizer
 
-# subekashi側の REPLACEABLE_HINSHIS（名詞・動詞・形容詞）に、
-# 副詞・連体詞を加えて置き換え対象の品詞を増やした
+# subekashi側の REPLACEABLE_HINSHIS（subekashi/lib/lyric_tokenizer.py）に、
+# 副詞・連体詞を加えて置き換え対象の品詞を増やした。
+# ここで増やした品詞をsubekashi側でも実際に使うには、
+# subekashi側のREPLACEABLE_HINSHISも合わせて更新する必要がある。
 REPLACEABLE_HINSHIS = ["名詞", "動詞", "形容詞", "副詞", "連体詞"]
+
+# 五段動詞の連用タ接続（例:「読ん」「書い」）に対する、正しい撥音便/
+# 促音便/イ音便の接尾辞。infl_type（活用の種類）ごとに異なるため、
+# 語幹の末尾の文字だけでは正しく判定できない
+# （例:「泳い」「書い」はどちらも「い」で終わるが、正しい語彙表記は
+# 「泳いで」「書いて」と濁る/濁らないが異なる）。
+_VERB_ONBIN_SUFFIX = {
+    "五段・ガ行": "で",
+    "五段・カ行イ音便": "て",
+    "五段・マ行": "で",
+    "五段・ナ行": "で",
+    "五段・バ行": "で",
+    "五段・ワ行促音便": "て",
+    "五段・タ行": "て",
+    "五段・ラ行": "て",
+    # 五段・サ行（例:「話し」）・一段（例:「食べ」）は音便が発生せず、
+    # そのまま「て」「た」等が直接続くためテーブルに含めない
+}
 
 _tokenizer = Tokenizer()
 
@@ -30,24 +50,28 @@ def counter(word):
 
 def tokenizer_janome(text):
     """
-    テキストを単語ごとに分割し、(表記, 品詞, 活用形/品詞細分類) のタプルの
-    リストを返す。
+    テキストを単語ごとに分割し、(表記, 品詞, 活用形/品詞細分類, 活用の種類)
+    のタプルのリストを返す。
 
     動詞・形容詞は活用形(infl_form)をそのまま、名詞は品詞細分類
     (part_of_speech)をそのまま3つ目の要素とする。先頭2文字だけを見る
     実装だと、例えば「連用形」と「連用タ接続」のように異なる活用形を
     同一視してしまうため、切り詰めは行わない。
+    4つ目の要素（活用の種類、infl_type）は動詞の音便判定にのみ使う。
     """
     toklist = []
     for tok in _tokenizer.tokenize(text, wakati=False):
         hinshi = tok.part_of_speech.split(',')[0]
         if hinshi in ("動詞", "形容詞"):
             katsuyou = tok.infl_form
+            infl_type = tok.infl_type
         elif hinshi == "名詞":
             katsuyou = tok.part_of_speech
+            infl_type = ""
         else:
             katsuyou = ""
-        toklist.append((tok.surface, hinshi, katsuyou))
+            infl_type = ""
+        toklist.append((tok.surface, hinshi, katsuyou, infl_type))
     return toklist
 
 
@@ -69,7 +93,7 @@ def preprocessing(text):
 
     text = re.sub(r'[0-9 ０-９]', '', text)  # 数字の除去
     text = re.sub(r'[!-/:-@[-`{-~]', '', text)  # 半角記号の除去
-    text = re.sub(r'/[！-／：-＠［-｀｛-～、-〜”’・]', '', text)  # 全角記号の除去
+    text = re.sub(r'[！-／：-＠［-｀｛-～、-〜”’・]', '', text)  # 全角記号の除去
     text = format_text(text)
 
     return text
@@ -79,21 +103,24 @@ def tokenizer_with_preprocessing(text):
     return tokenizer_janome(preprocessing(text))
 
 
-def conjugate_for_lookup(word, hinshi):
+def conjugate_for_lookup(word, hinshi, katsuyou="", infl_type=""):
     """
     word2vecの語彙は言い切りに近い表記（例:「読んで」）で登録されている
-    ことが多いため、撥音便・促音便・イ音便を補正してから語彙検索する。
+    ことが多いため、連用タ接続（katsuyou=="連用タ接続"）の語幹に対して、
+    活用の種類(infl_type)に応じた正しい撥音便・促音便・イ音便の接尾辞を
+    補ってから語彙検索する。
+    形容詞の連用タ接続は常に「て」（例:「楽しかっ」→「楽しかって」）。
+    サ行五段・一段活用の動詞（連用タ接続ではなく連用形になる、
+    例:「話し」「食べ」）や基本形は音便が発生しないためそのまま検索する。
     戻り値は検索専用の表記であり、候補として保存する表記（引数のword）
     自体は書き換えない。
     """
-    if hinshi == "動詞" and len(word) >= 2:
-        if word[-1] == "ん":
-            return word + "で"
-        if word[-1] == "っ":
-            return word + "て"
-        if word[-1] == "い":
-            return word + "て"
-    elif hinshi == "形容詞" and word and word[-1] == "っ":
+    if katsuyou != "連用タ接続":
+        return word
+    if hinshi == "動詞":
+        suffix = _VERB_ONBIN_SUFFIX.get(infl_type)
+        return word + suffix if suffix else word
+    if hinshi == "形容詞":
         return word + "て"
     return word
 
@@ -114,7 +141,10 @@ def build_word_candidates(lyrics_list, model, max_candidates=20, oversample_fact
     """
     歌詞のリストとword2vecモデルから、模倣単語候補データを構築する。
 
-    同じ (word, hinshi) の組み合わせは歌詞をまたいで重複計算しない。
+    同じ (word, hinshi, katsuyou) の組み合わせは歌詞をまたいで重複計算
+    しない（katsuyouまで含めるのは、同じ表記・品詞大分類でも活用形/
+    品詞細分類が異なる出現に対して、最初の出現用に絞り込んだ候補を
+    誤って使い回さないようにするため）。
     候補は以下の条件をすべて満たすもののみ採用する：
     - 品詞（大分類）が元の単語と一致する
     - 活用形/品詞細分類が元の単語と一致する（差し替えても文法的に破綻しにくくするため）
@@ -125,14 +155,16 @@ def build_word_candidates(lyrics_list, model, max_candidates=20, oversample_fact
     候補が1件も残らなかった単語は結果に含まれない。
     """
     results = {}
+    computed = set()
 
     for lyrics in lyrics_list:
-        for word, hinshi, katsuyou in tokenizer_with_preprocessing(lyrics):
-            key = (word, hinshi)
-            if key in results or not is_replaceable_token(word, hinshi):
+        for word, hinshi, katsuyou, infl_type in tokenizer_with_preprocessing(lyrics):
+            memo_key = (word, hinshi, katsuyou)
+            if memo_key in computed or not is_replaceable_token(word, hinshi):
                 continue
+            computed.add(memo_key)
 
-            lookup_word = conjugate_for_lookup(word, hinshi)
+            lookup_word = conjugate_for_lookup(word, hinshi, katsuyou, infl_type)
             if lookup_word not in model:
                 continue
 
@@ -144,7 +176,7 @@ def build_word_candidates(lyrics_list, model, max_candidates=20, oversample_fact
                 sim_tokens = tokenizer_janome(sim_word)
                 if len(sim_tokens) != 1:
                     continue  # 複合語・フレーズはそのまま単語として差し替えられないため除外
-                sim_surface, sim_hinshi, sim_katsuyou = sim_tokens[0]
+                sim_surface, sim_hinshi, sim_katsuyou, _sim_infl_type = sim_tokens[0]
                 if sim_surface == word:
                     continue
                 if not is_replaceable_token(sim_surface, sim_hinshi):
@@ -158,7 +190,7 @@ def build_word_candidates(lyrics_list, model, max_candidates=20, oversample_fact
                     break
 
             if candidates:
-                results[key] = candidates
+                results[(word, hinshi)] = candidates
 
     return [
         {"word": word, "hinshi": hinshi, "candidates": candidates}

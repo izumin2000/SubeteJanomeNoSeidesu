@@ -3,6 +3,7 @@ generate_word_json.py のテスト
 
 実際のネットワークアクセスは行わず、requests.get をモックして検証する。
 """
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -13,7 +14,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from generate_word_json import ensure_vector_file, fetch_lyrics  # noqa: E402
+from generate_word_json import _positive_int, ensure_vector_file, fetch_lyrics  # noqa: E402
 
 
 class TestFetchLyrics:
@@ -65,12 +66,40 @@ class TestFetchLyrics:
 
         assert result == []
 
-    def test_raises_on_http_error(self):
+    def test_raises_after_exhausting_retries_on_http_error(self):
         mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = Exception("HTTP error")
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP error")
+        with patch("generate_word_json.requests.get", return_value=mock_response) as mock_get:
+            with patch("generate_word_json.time.sleep"):
+                with pytest.raises(requests.exceptions.HTTPError):
+                    fetch_lyrics("https://example.com/api/song/")
+
+        assert mock_get.call_count == 3  # _fetch_song_pageのデフォルトmax_retries
+
+    def test_retries_page_after_transient_failure_then_succeeds(self):
+        page1 = self._mock_page_response(
+            [{"lyrics": "歌詞1", "is_joke": False, "is_questionable": False}], page=1, max_page=1
+        )
+        with patch(
+            "generate_word_json.requests.get",
+            side_effect=[requests.exceptions.ConnectionError("transient"), page1],
+        ) as mock_get:
+            with patch("generate_word_json.time.sleep") as mock_sleep:
+                result = fetch_lyrics("https://example.com/api/song/")
+
+        assert result == ["歌詞1"]
+        assert mock_get.call_count == 2
+        mock_sleep.assert_called_once()
+
+    def test_raises_on_non_json_response(self):
+        # メンテナンスページ等、非JSONのレスポンスが返ってきたケース
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.side_effect = ValueError("not JSON")
         with patch("generate_word_json.requests.get", return_value=mock_response):
-            with pytest.raises(Exception):
-                fetch_lyrics("https://example.com/api/song/")
+            with patch("generate_word_json.time.sleep"):
+                with pytest.raises(ValueError):
+                    fetch_lyrics("https://example.com/api/song/")
 
     def test_traverses_all_pages(self):
         page1 = self._mock_page_response(
@@ -191,3 +220,22 @@ class TestEnsureVectorFile:
 
         assert path.read_bytes() == b"0123456789"
         assert result == str(path)
+
+
+class TestPositiveInt:
+    """
+    --max-candidates 0 のような値を指定すると、gensim側のmost_similar(topn=0)が
+    (word, score)タプルではなく生の配列を返しアンパックでクラッシュするため、
+    argparseの時点で1未満の値を拒否する。
+    """
+
+    def test_accepts_positive_value(self):
+        assert _positive_int("5") == 5
+
+    def test_rejects_zero(self):
+        with pytest.raises(argparse.ArgumentTypeError):
+            _positive_int("0")
+
+    def test_rejects_negative_value(self):
+        with pytest.raises(argparse.ArgumentTypeError):
+            _positive_int("-1")
