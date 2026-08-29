@@ -1,0 +1,62 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    # Optional: Only run on specific file changes
+    # paths:
+    #   - "src/**/*.ts"
+    #   - "src/**/*.tsx"
+    #   - "src/**/*.js"
+    #   - "src/**/*.jsx"
+
+jobs:
+  claude-review:
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            以下の観点でこのプルリクエストをレビューし、フィードバックをください。
+
+            - コードの品質・ベストプラクティスへの準拠
+            - バグ・潜在的な問題
+            - パフォーマンス上の懸念（word2vecモデルの読み込み・大量の歌詞データに対するトークナイズ処理など、データ量に応じてコストが増える処理は特に注意してください）
+            - セキュリティ上の懸念（外部API呼び出し・ダウンロード処理のエラーハンドリングなど）
+            - テストカバレッジ:
+                - 新規機能や既存ロジックの変更に対してテストが必要な場合は、その旨を明示してください（`tests/` 以下、pytest）
+                - 既存のテストが変更の影響を受ける場合は、更新が必要な旨を伝えてください
+                - テストが十分に書かれている場合はその点を評価してください
+                - word2vecモデル自体を必要とするテストは実行できない環境である点は考慮してください（フェイクモデルを使ったテストで十分です）
+
+            **レビューは必ず日本語で記述してください。**
+            建設的かつ具体的なフィードバックをお願いします。
+
+            `gh pr comment` を Bash ツールで使用し、レビューを PR のコメントとして投稿してください。
+
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
