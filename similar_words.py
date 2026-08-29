@@ -156,7 +156,7 @@ def build_word_candidates(lyrics_list, model, max_candidates=20, oversample_fact
     3引数で呼ばれる。model.most_similar()は語彙数に応じて時間がかかる
     ことがあるため、呼び出し側で進捗表示に使うことを想定している。
 
-    戻り値: [{"word": str, "hinshi": str, "candidates": [str, ...]}, ...]
+    戻り値: [{"word": str, "hinshi": str, "katsuyou": str, "candidates": [str, ...]}, ...]
     候補が1件も残らなかった単語は結果に含まれない。
     """
     results = {}
@@ -196,12 +196,12 @@ def build_word_candidates(lyrics_list, model, max_candidates=20, oversample_fact
                     break
 
             if candidates:
-                results[(word, hinshi)] = candidates
+                results[(word, hinshi, katsuyou)] = candidates
 
         if on_progress:
             on_progress(processed, total, len(computed))
 
     return [
-        {"word": word, "hinshi": hinshi, "candidates": candidates}
-        for (word, hinshi), candidates in results.items()
+        {"word": word, "hinshi": hinshi, "katsuyou": katsuyou, "candidates": candidates}
+        for (word, hinshi, katsuyou), candidates in results.items()
     ]

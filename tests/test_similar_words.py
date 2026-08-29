@@ -168,7 +168,7 @@ class TestBuildWordCandidates:
 
         result = build_word_candidates(["私は走る"], model)
 
-        assert result == [{"word": "走る", "hinshi": "動詞", "candidates": ["泳ぐ"]}]
+        assert result == [{"word": "走る", "hinshi": "動詞", "katsuyou": "基本形", "candidates": ["泳ぐ"]}]
 
     def test_conjugated_verb_is_looked_up_with_onbin_suffix(self):
         # 「読んだ」の「読ん」は連用タ接続・五段マ行のため、
@@ -180,7 +180,7 @@ class TestBuildWordCandidates:
 
         result = build_word_candidates(["歌詞を読んだ"], model)
 
-        assert result == [{"word": "読ん", "hinshi": "動詞", "candidates": ["叫ん"]}]
+        assert result == [{"word": "読ん", "hinshi": "動詞", "katsuyou": "連用タ接続", "candidates": ["叫ん"]}]
 
     def test_excludes_candidate_with_different_hinshi(self):
         model = FakeModel({

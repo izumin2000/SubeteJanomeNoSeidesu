@@ -38,10 +38,12 @@ word2vecモデルはfastTextの日本語学習済みベクトル（`cc.ja.300.ve
 
 ```json
 [
-  {"word": "走る", "hinshi": "動詞", "candidates": ["泳ぐ", "駆け出す"]},
-  {"word": "犬", "hinshi": "名詞", "candidates": ["猫", "狼"]}
+  {"word": "走る", "hinshi": "動詞", "katsuyou": "基本形", "candidates": ["泳ぐ", "駆け出す"]},
+  {"word": "犬", "hinshi": "名詞", "katsuyou": "名詞,一般,*,*", "candidates": ["猫", "狼"]}
 ]
 ```
+
+`katsuyou`は、動詞・形容詞は活用形（`infl_form`）、名詞は品詞細分類（`part_of_speech`のフル文字列）、それ以外は空文字列。subekashi側で候補を絞り込む際、`word`ではなく`hinshi`・`katsuyou`の組み合わせで一致判定するために使う（同じ`word`でなくても、活用形が一致していれば置き換えても文法的に破綻しにくいため）。
 
 ## 候補選定のルール
 
