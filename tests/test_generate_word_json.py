@@ -127,6 +127,20 @@ class TestFetchLyrics:
         _, kwargs = mock_get.call_args
         assert kwargs["params"]["size"] == 123
 
+    def test_calls_on_progress_after_each_page(self):
+        page1 = self._mock_page_response(
+            [{"lyrics": "歌詞1", "is_joke": False, "is_questionable": False}], page=1, max_page=2
+        )
+        page2 = self._mock_page_response(
+            [{"lyrics": "歌詞2", "is_joke": False, "is_questionable": False}], page=2, max_page=2
+        )
+        progress_calls = []
+
+        with patch("generate_word_json.requests.get", side_effect=[page1, page2]):
+            fetch_lyrics("https://example.com/api/song/", on_progress=lambda *args: progress_calls.append(args))
+
+        assert progress_calls == [(1, 2, 1), (2, 2, 2)]
+
 
 class TestEnsureVectorFile:
     def _mock_stream_response(self, content, status_code=200, content_length=None):

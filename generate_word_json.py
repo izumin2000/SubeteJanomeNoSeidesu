@@ -102,7 +102,7 @@ def _fetch_song_page(song_api_url, page_size, page, max_retries=3):
             time.sleep(min(2 ** attempt, 30))
 
 
-def fetch_lyrics(song_api_url=DEFAULT_SONG_API, page_size=DEFAULT_PAGE_SIZE):
+def fetch_lyrics(song_api_url=DEFAULT_SONG_API, page_size=DEFAULT_PAGE_SIZE, on_progress=None):
     """
     Song APIから歌詞テキストの一覧を取得する。
 
@@ -110,6 +110,11 @@ def fetch_lyrics(song_api_url=DEFAULT_SONG_API, page_size=DEFAULT_PAGE_SIZE):
     形式のページネーションされたオブジェクトであるため、max_pageまで
     ページを辿って全件取得する。
     ネタ動画（is_joke）・界隈曲か疑わしい曲（is_questionable）は除外する。
+
+    on_progress: 進捗を報告するコールバック（省略可）。1ページ取得し
+    終えるたびに (取得済みページ数, 総ページ数, これまでに取得した歌詞数)
+    の3引数で呼ばれる。総ページ数は最初のページを取得するまで不明なため、
+    それ以前は呼ばれない。
     """
     lyrics_list = []
     page = 1
@@ -121,6 +126,9 @@ def fetch_lyrics(song_api_url=DEFAULT_SONG_API, page_size=DEFAULT_PAGE_SIZE):
             for song in data["result"]
             if song.get("lyrics") and not song.get("is_joke") and not song.get("is_questionable")
         )
+
+        if on_progress:
+            on_progress(page, data["max_page"], len(lyrics_list))
 
         if page >= data["max_page"]:
             break
@@ -145,7 +153,17 @@ def main():
     args = parser.parse_args()
 
     print(f"歌詞を取得中... ({args.song_api})")
-    lyrics_list = fetch_lyrics(args.song_api, page_size=args.page_size)
+
+    def _print_fetch_progress(page, max_page, count):
+        percent = page * 100 // max_page if max_page else 100
+        print(
+            f"\r歌詞を取得中... {percent}% ({page}/{max_page}ページ、{count}件の歌詞を取得済み)",
+            end="",
+            flush=True,
+        )
+
+    lyrics_list = fetch_lyrics(args.song_api, page_size=args.page_size, on_progress=_print_fetch_progress)
+    print()
     print(f"{len(lyrics_list)}件の歌詞を取得しました")
 
     vector_path = ensure_vector_file()
