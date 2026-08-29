@@ -137,7 +137,7 @@ def is_replaceable_token(word, hinshi):
     return True
 
 
-def build_word_candidates(lyrics_list, model, max_candidates=20, oversample_factor=3):
+def build_word_candidates(lyrics_list, model, max_candidates=20, oversample_factor=3, on_progress=None):
     """
     歌詞のリストとword2vecモデルから、模倣単語候補データを構築する。
 
@@ -151,13 +151,19 @@ def build_word_candidates(lyrics_list, model, max_candidates=20, oversample_fact
     - ひらがな・カタカナ・漢字の構成が元の単語と一致する（見た目のバランスを保つため）
     - 単一のjanomeトークンとして解釈できる（複合語・フレーズ候補を除外するため）
 
+    on_progress: 進捗を報告するコールバック（省略可）。歌詞を1件処理し
+    終えるたびに (処理済み件数, 総件数, これまでに計算した単語数) の
+    3引数で呼ばれる。model.most_similar()は語彙数に応じて時間がかかる
+    ことがあるため、呼び出し側で進捗表示に使うことを想定している。
+
     戻り値: [{"word": str, "hinshi": str, "candidates": [str, ...]}, ...]
     候補が1件も残らなかった単語は結果に含まれない。
     """
     results = {}
     computed = set()
+    total = len(lyrics_list)
 
-    for lyrics in lyrics_list:
+    for processed, lyrics in enumerate(lyrics_list, start=1):
         for word, hinshi, katsuyou, infl_type in tokenizer_with_preprocessing(lyrics):
             memo_key = (word, hinshi, katsuyou)
             if memo_key in computed or not is_replaceable_token(word, hinshi):
@@ -191,6 +197,9 @@ def build_word_candidates(lyrics_list, model, max_candidates=20, oversample_fact
 
             if candidates:
                 results[(word, hinshi)] = candidates
+
+        if on_progress:
+            on_progress(processed, total, len(computed))
 
     return [
         {"word": word, "hinshi": hinshi, "candidates": candidates}

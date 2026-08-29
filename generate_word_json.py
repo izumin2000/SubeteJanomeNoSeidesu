@@ -153,7 +153,20 @@ def main():
     model = gensim.models.KeyedVectors.load_word2vec_format(vector_path)
 
     print("模倣単語候補を計算中...")
-    word_candidates = build_word_candidates(lyrics_list, model, max_candidates=args.max_candidates)
+
+    def _print_progress(processed, total, unique_words):
+        percent = processed * 100 // total if total else 100
+        print(
+            f"\r模倣単語候補を計算中... {percent}% "
+            f"({processed}/{total}件の歌詞、単語{unique_words}語分を計算済み)",
+            end="",
+            flush=True,
+        )
+
+    word_candidates = build_word_candidates(
+        lyrics_list, model, max_candidates=args.max_candidates, on_progress=_print_progress
+    )
+    print()
     print(f"{len(word_candidates)}語分の候補を生成しました")
 
     with open(args.output, "w", encoding="utf-8") as f:
